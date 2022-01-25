@@ -1,0 +1,116 @@
+kind: pipeline
+name: default
+global-variables:
+  default_image: &default_image 367771023052.dkr.ecr.eu-central-1.amazonaws.com/paas_build_base:1.3.1
+
+workspace:
+  base: /go
+  path: epilot-tripica-proxy
+
+volumes:
+  - name: docker-sock
+    host:
+      path: /var/run/docker.sock
+
+steps:
+  - name: test
+    image: *default_image
+    commands:
+      - go test ./...
+
+  - name: build
+    image: *default_image
+    commands:
+      - go build -ldflags "-X 'main.version=[revDate:`git show -s --format=%ci | tr ' ' '_'`][rev:`git rev-parse HEAD`][branch:`git rev-parse --abbrev-ref HEAD`]' -X main.buildDate=`date '+%Y-%m-%dT%H:%M:%S%z'` -X main.adaptorName=$@"
+      - ls -al 
+
+  - name: compress
+    image: *default_image
+    commands:
+      - gzip -c ed4-svc-epilot-tripica-proxy > epilot-tripica-proxy.gz
+    when:
+      branch:
+        - develop
+        - master
+        - release/*
+      event:
+        exclude:
+          - pull_request
+
+  - name: upload-binary-to-s3
+    image: plugins/s3-sync:1
+    settings:
+      bucket: ed4-ci-artifacts
+      access_key:
+        from_secret: AWS_ACCESS_KEY_ID
+      secret_key:
+        from_secret: AWS_SECRET_ACCESS_KEY
+      region: eu-west-2
+      source: epilot-tripica-proxy.gz
+      target: /binaries/${DRONE_COMMIT_SHA}/epilot-tripica-proxy.gz
+      acl: authenticated-read
+    when:
+      branch:
+        - develop
+        - master
+        - release/*
+      event:
+        exclude:
+          - pull_request
+
+  - name: deploy
+    image: *default_image
+    environment:
+      SSH_PRIVATE_KEY:
+        from_secret: SSH_PRIVATE_KEY
+      AWS_REGION:
+        from_secret: REGION
+      AWS_PROFILE:
+        from_secret: PROFILE
+      AWS_ACCESS_KEY_ID:
+        from_secret: AWS_ACCESS_KEY_ID
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: AWS_SECRET_ACCESS_KEY
+      ED4_CACHE_AGE_LIMIT: 600
+      SUB_ENVIRONMENT:
+        from_secret: SUB_ENVIRONMENT
+    commands:
+      - setup_access
+      - git clone git@github.com:enercity/ed4-services-iac.git /go/drone/src/ed4-services-iac
+      - export ED4_CACHE_AGE_LIMIT=3600
+      - cd /go/drone/src/ed4-services-iac &&  ./deploy.py -f --clone-over-https --skip-terraform --skip-prepare --skip-base epilot-tripica-proxy:${DRONE_COMMIT_SHA}
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+    when:
+      branch: [develop]
+      event:
+        exclude:
+          - pull_request
+
+  # build.author is blank. This is a known issue, fixed here - https://github.com/drone/go-scm/pull/30
+  # next time drone is updated the fix should be picked up, for now, we'll live with this being blank
+  - name: slack failure
+    image: plugins/slack
+    when:
+      branch: [develop, master]
+      status: [failure]
+      event:
+        exclude:
+          - pull_request
+    settings:
+      webhook:
+        from_secret: SLACK_BUILD_FAILURE_URL
+      channel: development_labs
+      template: >
+        Fail. <{{build.link}}|Build ${DRONE_REPO}:{{build.number}}> {{truncate build.commit 7}} on {{build.branch}} by {{build.author}}
+  - name: slack success
+    image: plugins/slack
+    when:
+      status: [success]
+    settings:
+      webhook:
+        from_secret: SLACK_BUILD_SUCCESS_URL
+      channel: version_dev
+      template: >
+        Success! <{{build.link}}|Build ${DRONE_REPO}:{{build.number}}> {{truncate build.commit 7}} on {{build.branch}} by {{build.author}}

@@ -1,0 +1,29 @@
+timeout: 30m
+
+linters-settings:
+  gocyclo:
+    min-complexity: 10
+
+issues:
+  exclude-rules:
+    - path: _test\.go|mock|integration
+      linters:
+        - nlreturn
+        - testpackage
+        - funlen
+        - gomnd
+        - gochecknoglobals
+        - goconst
+        - lll
+        - testpackage
+        - scopelint
+        - gofumpt
+        - gci
+    - path: .go
+      linters:
+        - gci
+        - nlreturn
+        - wsl
+        - nolintlint
+        - goerr113
+        - gofumpt

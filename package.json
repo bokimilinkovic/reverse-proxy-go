@@ -1,0 +1,6 @@
+{
+    "mandatoryParameters": [
+        "tripica_host"
+    ],
+    "version": "0.1.1"
+}

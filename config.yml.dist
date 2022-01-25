@@ -1,0 +1,5 @@
+tripica:
+  host: <tripica url>
+  
+server:
+  port: <port>
